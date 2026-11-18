@@ -8,6 +8,11 @@ export function notFound(req, res, next) {
 // Express recognizes an error handler by its FOUR parameters.
 // eslint-disable-next-line no-unused-vars
 export function errorHandler(err, req, res, next) {
+  if (res.headersSent) {
+    console.error(err);
+    return res.end();
+  }
+
   let statusCode = err.statusCode || 500;
   let message = err.message || "Something went wrong";
   let details = err.details;

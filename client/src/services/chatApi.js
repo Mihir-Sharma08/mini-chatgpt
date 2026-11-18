@@ -1,4 +1,4 @@
-const API_URL = import.meta.env.VITE_API_URL ?? "";
+import { API_URL, readErrorMessage } from "./api";
 
 function parseFrame(frame) {
   let event = "message";
@@ -13,7 +13,6 @@ function parseFrame(frame) {
   }
 
   let data = {};
-
   try {
     data = dataText ? JSON.parse(dataText) : {};
   } catch {
@@ -22,16 +21,15 @@ function parseFrame(frame) {
 
   return { event, data };
 }
- 
 
-export async function streamChat({ messages, onToken, signal }) {
+export async function streamChat({ conversationId, message, onMeta, onToken, signal }) {
   let response;
 
   try {
     response = await fetch(`${API_URL}/api/chat/stream`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages }),
+      body: JSON.stringify({ conversationId, message }),
       signal,
     });
   } catch {
@@ -39,20 +37,12 @@ export async function streamChat({ messages, onToken, signal }) {
   }
 
   if (!response.ok) {
-    let message = `Request failed (status ${response.status})`;
-    try {
-      const body = await response.json();
-      if (body.message) message = body.message;
-    } catch {
-      // Body wasn't JSON; keep the default message.
-    }
-    throw new Error(message);
+    throw new Error(await readErrorMessage(response));
   }
 
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
-  let fullText = "";
 
   while (true) {
     const { done, value } = await reader.read();
@@ -66,16 +56,15 @@ export async function streamChat({ messages, onToken, signal }) {
     for (const frame of frames) {
       const { event, data } = parseFrame(frame);
 
-      if (event === "token") {
-        fullText += data.text;
+      if (event === "meta") {
+        onMeta?.(data);
+      } else if (event === "token") {
         onToken(data.text);
       } else if (event === "error") {
         throw new Error(data.message || "The AI response failed.");
       } else if (event === "done") {
-        return fullText;
+        return;
       }
     }
   }
-
-  return fullText;
 }

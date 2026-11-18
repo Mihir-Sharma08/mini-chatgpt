@@ -1,93 +1,147 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Sidebar from "./components/Sidebar";
 import ChatWindow from "./components/ChatWindow";
 import { streamChat } from "./services/chatApi";
+import * as api from "./services/api";
 
 const createId = () => crypto.randomUUID();
 
 export default function App() {
   const [conversations, setConversations] = useState([]);
   const [activeId, setActiveId] = useState(null);
+  const [messages, setMessages] = useState([]);
+  const [isListLoading, setIsListLoading] = useState(true);
+  const [isHistoryLoading, setIsHistoryLoading] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [notice, setNotice] = useState(null);
+
+  const loadCounter = useRef(0);
 
   const activeConversation = conversations.find((c) => c.id === activeId);
-  const messages = activeConversation ? activeConversation.messages : [];
 
-  const updateConversation = (conversationId, updater) => {
-    setConversations((prev) => prev.map((c) => (c.id === conversationId ? updater(c) : c)));
+  useEffect(() => {
+    let cancelled = false;
+
+    api
+      .fetchConversations()
+      .then((list) => {
+        if (!cancelled) setConversations(list);
+      })
+      .catch((error) => {
+        if (!cancelled) setNotice(error.message);
+      })
+      .finally(() => {
+        if (!cancelled) setIsListLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const moveToTop = (id) => {
+    setConversations((prev) => {
+      const item = prev.find((c) => c.id === id);
+      return item ? [item, ...prev.filter((c) => c.id !== id)] : prev;
+    });
+  };
+
+  const resetToNewChat = () => {
+    loadCounter.current += 1;
+    setActiveId(null);
+    setMessages([]);
+    setIsHistoryLoading(false);
   };
 
   const handleNewChat = () => {
-    setActiveId(null);
+    resetToNewChat();
+    setNotice(null);
     setIsSidebarOpen(false);
   };
 
-  const handleSelect = (id) => {
+  const handleSelect = async (id) => {
+    setNotice(null);
+    setIsSidebarOpen(false);
     setActiveId(id);
-    setIsSidebarOpen(false);
+    setMessages([]);
+    setIsHistoryLoading(true);
+
+    loadCounter.current += 1;
+    const requestNumber = loadCounter.current;
+
+    try {
+      const data = await api.fetchConversation(id);
+      if (requestNumber !== loadCounter.current) return;
+      setMessages(data.messages);
+    } catch (error) {
+      if (requestNumber !== loadCounter.current) return;
+      setNotice(error.message);
+    } finally {
+      if (requestNumber === loadCounter.current) setIsHistoryLoading(false);
+    }
   };
 
-  const handleDelete = (id) => {
-    setConversations((prev) => prev.filter((c) => c.id !== id));
-    if (id === activeId) setActiveId(null);
+  const handleRename = async (id, title) => {
+    try {
+      const updated = await api.renameConversation(id, title);
+      setConversations((prev) => [updated, ...prev.filter((c) => c.id !== id)]);
+    } catch (error) {
+      setNotice(error.message);
+    }
+  };
+
+  const handleDelete = async (id) => {
+    try {
+      await api.deleteConversation(id);
+      setConversations((prev) => prev.filter((c) => c.id !== id));
+      if (id === activeId) resetToNewChat();
+    } catch (error) {
+      setNotice(error.message);
+    }
   };
 
   const handleSend = async (text) => {
-    const userMessage = { id: createId(), role: "user", content: text };
-    let conversationId = activeId;
-    let history;
+    setNotice(null);
 
-    if (!conversationId) {
-      conversationId = createId();
-      const title = text.length > 30 ? `${text.slice(0, 30)}...` : text;
-      history = [userMessage];
-      setConversations((prev) => [{ id: conversationId, title, messages: history }, ...prev]);
-      setActiveId(conversationId);
-    } else {
-      const existing = conversations.find((c) => c.id === conversationId);
-      history = [...existing.messages, userMessage];
-      updateConversation(conversationId, (c) => ({ ...c, messages: history }));
-    }
-
-    setIsLoading(true);
-
+    const isNewConversation = activeId === null;
     const assistantId = createId();
     let started = false;
 
-    // Send only what the model needs: role + content, and never our own error bubbles.
-    const apiMessages = history
-      .filter((m) => !m.isError)
-      .map(({ role, content }) => ({ role, content }));
+    setMessages((prev) => [...prev, { id: createId(), role: "user", content: text }]);
+    setIsLoading(true);
 
     try {
       await streamChat({
-        messages: apiMessages,
+        conversationId: activeId ?? undefined,
+        message: text,
+        onMeta: ({ conversationId, title }) => {
+          if (isNewConversation) {
+            setActiveId(conversationId);
+            setConversations((prev) => [
+              { id: conversationId, title, updatedAt: new Date().toISOString() },
+              ...prev,
+            ]);
+          }
+        },
         onToken: (token) => {
           if (!started) {
             started = true;
-            updateConversation(conversationId, (c) => ({
-              ...c,
-              messages: [...c.messages, { id: assistantId, role: "assistant", content: token }],
-            }));
+            setMessages((prev) => [...prev, { id: assistantId, role: "assistant", content: token }]);
           } else {
-            updateConversation(conversationId, (c) => ({
-              ...c,
-              messages: c.messages.map((m) =>
-                m.id === assistantId ? { ...m, content: m.content + token } : m,
-              ),
-            }));
+            setMessages((prev) =>
+              prev.map((m) => (m.id === assistantId ? { ...m, content: m.content + token } : m)),
+            );
           }
         },
       });
+
+      if (!isNewConversation) moveToTop(activeId);
     } catch (error) {
-      updateConversation(conversationId, (c) => ({
-        ...c,
-        messages: [
-          ...c.messages,
-          { id: createId(), role: "assistant", content: error.message, isError: true },
-        ],
-      }));
+      setMessages((prev) => [
+        ...prev,
+        { id: createId(), role: "assistant", content: error.message, isError: true },
+      ]);
     } finally {
       setIsLoading(false);
     }
@@ -98,9 +152,12 @@ export default function App() {
       <Sidebar
         conversations={conversations}
         activeId={activeId}
+        isListLoading={isListLoading}
+        isBusy={isLoading}
         onNewChat={handleNewChat}
         onSelect={handleSelect}
         onDelete={handleDelete}
+        onRename={handleRename}
         isOpen={isSidebarOpen}
         onClose={() => setIsSidebarOpen(false)}
       />
@@ -108,6 +165,9 @@ export default function App() {
         title={activeConversation ? activeConversation.title : "New chat"}
         messages={messages}
         isLoading={isLoading}
+        isHistoryLoading={isHistoryLoading}
+        notice={notice}
+        onDismissNotice={() => setNotice(null)}
         onSend={handleSend}
         onOpenSidebar={() => setIsSidebarOpen(true)}
       />
