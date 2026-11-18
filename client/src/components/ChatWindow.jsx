@@ -8,8 +8,11 @@ import ChatInput from "./ChatInput";
 export default function ChatWindow({ title, messages, isLoading, onSend, onOpenSidebar }) {
   const bottomRef = useRef(null);
 
+  const lastMessage = messages[messages.length - 1];
+  const showTyping = isLoading && lastMessage?.role === "user";
+
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    bottomRef.current?.scrollIntoView({ behavior: isLoading ? "auto" : "smooth" });
   }, [messages, isLoading]);
 
   return (
@@ -31,9 +34,14 @@ export default function ChatWindow({ title, messages, isLoading, onSend, onOpenS
         ) : (
           <div className="mx-auto w-full max-w-3xl space-y-6 px-4 py-6">
             {messages.map((message) => (
-              <MessageBubble key={message.id} role={message.role} content={message.content} />
+              <MessageBubble
+                key={message.id}
+                role={message.role}
+                content={message.content}
+                isError={message.isError}
+              />
             ))}
-            {isLoading && <TypingIndicator />}
+            {showTyping && <TypingIndicator />}
             <div ref={bottomRef} />
           </div>
         )}

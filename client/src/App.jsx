@@ -1,6 +1,7 @@
 import { useState } from "react";
 import Sidebar from "./components/Sidebar";
 import ChatWindow from "./components/ChatWindow";
+import { streamChat } from "./services/chatApi";
 
 const createId = () => crypto.randomUUID();
 
@@ -12,6 +13,10 @@ export default function App() {
 
   const activeConversation = conversations.find((c) => c.id === activeId);
   const messages = activeConversation ? activeConversation.messages : [];
+
+  const updateConversation = (conversationId, updater) => {
+    setConversations((prev) => prev.map((c) => (c.id === conversationId ? updater(c) : c)));
+  };
 
   const handleNewChat = () => {
     setActiveId(null);
@@ -28,40 +33,64 @@ export default function App() {
     if (id === activeId) setActiveId(null);
   };
 
-  const handleSend = (text) => {
+  const handleSend = async (text) => {
     const userMessage = { id: createId(), role: "user", content: text };
     let conversationId = activeId;
+    let history;
 
     if (!conversationId) {
       conversationId = createId();
       const title = text.length > 30 ? `${text.slice(0, 30)}...` : text;
-      const newConversation = { id: conversationId, title, messages: [userMessage] };
-      setConversations((prev) => [newConversation, ...prev]);
+      history = [userMessage];
+      setConversations((prev) => [{ id: conversationId, title, messages: history }, ...prev]);
       setActiveId(conversationId);
     } else {
-      setConversations((prev) =>
-        prev.map((c) =>
-          c.id === conversationId ? { ...c, messages: [...c.messages, userMessage] } : c,
-        ),
-      );
+      const existing = conversations.find((c) => c.id === conversationId);
+      history = [...existing.messages, userMessage];
+      updateConversation(conversationId, (c) => ({ ...c, messages: history }));
     }
 
     setIsLoading(true);
 
-    // TEMPORARY: fake AI reply. Replaced by a real API call in Phase 4.
-    setTimeout(() => {
-      const reply = {
-        id: createId(),
-        role: "assistant",
-        content: `This is a fake reply to: "${text}"\n\nThe real AI arrives in Phase 4.`,
-      };
-      setConversations((prev) =>
-        prev.map((c) =>
-          c.id === conversationId ? { ...c, messages: [...c.messages, reply] } : c,
-        ),
-      );
+    const assistantId = createId();
+    let started = false;
+
+    // Send only what the model needs: role + content, and never our own error bubbles.
+    const apiMessages = history
+      .filter((m) => !m.isError)
+      .map(({ role, content }) => ({ role, content }));
+
+    try {
+      await streamChat({
+        messages: apiMessages,
+        onToken: (token) => {
+          if (!started) {
+            started = true;
+            updateConversation(conversationId, (c) => ({
+              ...c,
+              messages: [...c.messages, { id: assistantId, role: "assistant", content: token }],
+            }));
+          } else {
+            updateConversation(conversationId, (c) => ({
+              ...c,
+              messages: c.messages.map((m) =>
+                m.id === assistantId ? { ...m, content: m.content + token } : m,
+              ),
+            }));
+          }
+        },
+      });
+    } catch (error) {
+      updateConversation(conversationId, (c) => ({
+        ...c,
+        messages: [
+          ...c.messages,
+          { id: createId(), role: "assistant", content: error.message, isError: true },
+        ],
+      }));
+    } finally {
       setIsLoading(false);
-    }, 1200);
+    }
   };
 
   return (
