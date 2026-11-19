@@ -22,17 +22,18 @@ function parseFrame(frame) {
   return { event, data };
 }
 
-export async function streamChat({ conversationId, message, onMeta, onToken, signal }) {
+async function streamFrom(path, body, { onMeta, onToken, signal }) {
   let response;
 
   try {
-    response = await fetch(`${API_URL}/api/chat/stream`, {
+    response = await fetch(`${API_URL}${path}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ conversationId, message }),
+      body: JSON.stringify(body),
       signal,
     });
-  } catch {
+  } catch (error) {
+    if (error.name === "AbortError") throw error;
     throw new Error("Cannot reach the server. Is the backend running?");
   }
 
@@ -67,4 +68,12 @@ export async function streamChat({ conversationId, message, onMeta, onToken, sig
       }
     }
   }
+}
+
+export function sendMessage({ conversationId, message, ...handlers }) {
+  return streamFrom("/api/chat/stream", { conversationId, message }, handlers);
+}
+
+export function regenerateReply({ conversationId, ...handlers }) {
+  return streamFrom("/api/chat/regenerate", { conversationId }, handlers);
 }

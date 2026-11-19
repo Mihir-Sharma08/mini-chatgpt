@@ -25,5 +25,20 @@ export function validateChatRequest(req, res, next) {
     message: message.trim(),
     conversationId: conversationId ?? undefined,
   };
+
+
+
+  next();
+}
+
+
+export function validateRegenerateRequest(req, res, next) {
+  const conversationId = req.body?.conversationId;
+
+  if (!isObjectIdString(conversationId)) {
+    return next(new AppError("Validation failed", 400, ["conversationId must be a valid ID"]));
+  }
+
+  req.body = { conversationId };
   next();
 }

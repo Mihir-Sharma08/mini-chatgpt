@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
-import { SendHorizontal } from "lucide-react";
+import { SendHorizontal, Square } from "lucide-react";
 
-export default function ChatInput({ onSend, disabled }) {
+export default function ChatInput({ onSend, onStop, isGenerating, disabled }) {
   const [text, setText] = useState("");
   const textareaRef = useRef(null);
 
@@ -44,14 +44,26 @@ export default function ChatInput({ onSend, disabled }) {
           placeholder="Message Mini ChatGPT..."
           className="max-h-[200px] flex-1 resize-none bg-transparent px-2 py-2 text-sm outline-none placeholder:text-zinc-500"
         />
-        <button
-          onClick={submit}
-          disabled={!canSend}
-          aria-label="Send message"
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-600 text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          <SendHorizontal size={18} />
-        </button>
+
+        {isGenerating ? (
+          <button
+            onClick={onStop}
+            aria-label="Stop generating"
+            title="Stop generating"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-zinc-200 text-zinc-900 transition hover:bg-white"
+          >
+            <Square size={14} fill="currentColor" />
+          </button>
+        ) : (
+          <button
+            onClick={submit}
+            disabled={!canSend}
+            aria-label="Send message"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-600 text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <SendHorizontal size={18} />
+          </button>
+        )}
       </div>
       <p className="mt-2 text-center text-xs text-zinc-500">
         AI can make mistakes. Check important information.

@@ -1,5 +1,5 @@
-import { useEffect, useRef } from "react";
-import { Menu, X, LoaderCircle } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Menu, X, LoaderCircle, ArrowDown } from "lucide-react";
 import MessageBubble from "./MessageBubble";
 import TypingIndicator from "./TypingIndicator";
 import EmptyState from "./EmptyState";
@@ -13,16 +13,46 @@ export default function ChatWindow({
   notice,
   onDismissNotice,
   onSend,
+  onStop,
+  onRegenerate,
+  onRetry,
   onOpenSidebar,
 }) {
-  const bottomRef = useRef(null);
+  const scrollRef = useRef(null);
+  const stickToBottom = useRef(true);
+  const [showJumpButton, setShowJumpButton] = useState(false);
 
-  const lastMessage = messages[messages.length - 1];
+  const lastIndex = messages.length - 1;
+  const lastMessage = messages[lastIndex];
   const showTyping = isLoading && lastMessage?.role === "user";
 
+  const handleScroll = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    stickToBottom.current = distanceFromBottom < 80;
+    setShowJumpButton(distanceFromBottom > 300);
+  };
+
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: isLoading ? "auto" : "smooth" });
-  }, [messages, isLoading]);
+    const el = scrollRef.current;
+    if (el && stickToBottom.current) {
+      el.scrollTop = el.scrollHeight;
+    }
+  }, [messages, isLoading, isHistoryLoading]);
+
+  useEffect(() => {
+    if (isHistoryLoading) stickToBottom.current = true;
+  }, [isHistoryLoading]);
+
+  const jumpToBottom = () => {
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+  };
+
+  const handleSend = (text) => {
+    stickToBottom.current = true;
+    onSend(text);
+  };
 
   let content;
   if (isHistoryLoading) {
@@ -33,20 +63,26 @@ export default function ChatWindow({
       </div>
     );
   } else if (messages.length === 0) {
-    content = <EmptyState onPick={onSend} />;
+    content = <EmptyState onPick={handleSend} />;
   } else {
     content = (
       <div className="mx-auto w-full max-w-3xl space-y-6 px-4 py-6">
-        {messages.map((message) => (
-          <MessageBubble
-            key={message.id}
-            role={message.role}
-            content={message.content}
-            isError={message.isError}
-          />
-        ))}
+        {messages.map((message, index) => {
+          const isLast = index === lastIndex;
+          const isAssistantReply = message.role === "assistant" && !message.isError;
+
+          return (
+            <MessageBubble
+              key={message.id}
+              message={message}
+              isStreaming={isLoading && isLast && message.role === "assistant"}
+              showRegenerate={!isLoading && isLast && isAssistantReply}
+              onRegenerate={onRegenerate}
+              onRetry={onRetry}
+            />
+          );
+        })}
         {showTyping && <TypingIndicator />}
-        <div ref={bottomRef} />
       </div>
     );
   }
@@ -64,20 +100,43 @@ export default function ChatWindow({
         <span className="truncate text-sm font-medium">{title}</span>
       </header>
 
-      <div className="flex-1 overflow-y-auto">{content}</div>
+      <div className="relative min-h-0 flex-1">
+        <div ref={scrollRef} onScroll={handleScroll} className="h-full overflow-y-auto">
+          {content}
+        </div>
+
+        {showJumpButton && (
+          <button
+            onClick={jumpToBottom}
+            aria-label="Scroll to latest message"
+            className="absolute bottom-4 left-1/2 flex h-9 w-9 -translate-x-1/2 items-center justify-center rounded-full border border-zinc-600 bg-zinc-800 text-zinc-200 shadow-lg hover:bg-zinc-700"
+          >
+            <ArrowDown size={18} />
+          </button>
+        )}
+      </div>
 
       {notice && (
         <div className="mx-auto flex w-full max-w-3xl items-start gap-2 px-4 pb-2">
           <div className="flex flex-1 items-start gap-2 rounded-lg border border-red-500/40 bg-red-950/40 px-3 py-2 text-sm text-red-200">
             <span className="flex-1">{notice}</span>
-            <button onClick={onDismissNotice} aria-label="Dismiss message" className="text-red-300 hover:text-white">
+            <button
+              onClick={onDismissNotice}
+              aria-label="Dismiss message"
+              className="text-red-300 hover:text-white"
+            >
               <X size={16} />
             </button>
           </div>
         </div>
       )}
 
-      <ChatInput onSend={onSend} disabled={isLoading || isHistoryLoading} />
+      <ChatInput
+        onSend={handleSend}
+        onStop={onStop}
+        isGenerating={isLoading}
+        disabled={isLoading || isHistoryLoading}
+      />
     </main>
   );
 }

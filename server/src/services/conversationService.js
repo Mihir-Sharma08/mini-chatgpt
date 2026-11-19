@@ -83,3 +83,11 @@ export async function getHistoryForModel(conversationId) {
 
   return recent.reverse();
 }
+
+export async function getLastMessage(conversationId) {
+  return Message.findOne({ conversationId }).sort({ createdAt: -1, _id: -1 });
+}
+
+export async function deleteMessage(messageId) {
+  await Message.deleteOne({ _id: messageId });
+}

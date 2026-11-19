@@ -1,10 +1,18 @@
 import { useEffect, useRef, useState } from "react";
 import Sidebar from "./components/Sidebar";
 import ChatWindow from "./components/ChatWindow";
-import { streamChat } from "./services/chatApi";
+import { sendMessage, regenerateReply } from "./services/chatApi";
 import * as api from "./services/api";
 
 const createId = () => crypto.randomUUID();
+
+// Removes trailing error bubbles, then one more message if it has the given role.
+function trimTrailing(messages, roleToDrop) {
+  const copy = [...messages];
+  while (copy.length > 0 && copy[copy.length - 1].isError) copy.pop();
+  if (copy.length > 0 && copy[copy.length - 1].role === roleToDrop) copy.pop();
+  return copy;
+}
 
 export default function App() {
   const [conversations, setConversations] = useState([]);
@@ -17,6 +25,7 @@ export default function App() {
   const [notice, setNotice] = useState(null);
 
   const loadCounter = useRef(0);
+  const abortRef = useRef(null);
 
   const activeConversation = conversations.find((c) => c.id === activeId);
 
@@ -101,25 +110,28 @@ export default function App() {
     }
   };
 
-  const handleSend = async (text) => {
-    setNotice(null);
+  // Shared by "send" and "regenerate": runs one streamed generation.
+  //  - start({ signal, onMeta, onToken }) performs the actual request
+  //  - retryIfNoTokens describes how "Try again" should work if the failure
+  //    happens before any text arrived
+  const runGeneration = async ({ conversationId, retryIfNoTokens, start }) => {
+    const controller = new AbortController();
+    abortRef.current = controller;
 
-    const isNewConversation = activeId === null;
+    const isNewConversation = conversationId === null;
     const assistantId = createId();
     let started = false;
 
-    setMessages((prev) => [...prev, { id: createId(), role: "user", content: text }]);
     setIsLoading(true);
 
     try {
-      await streamChat({
-        conversationId: activeId ?? undefined,
-        message: text,
-        onMeta: ({ conversationId, title }) => {
+      await start({
+        signal: controller.signal,
+        onMeta: ({ conversationId: newId, title }) => {
           if (isNewConversation) {
-            setActiveId(conversationId);
+            setActiveId(newId);
             setConversations((prev) => [
-              { id: conversationId, title, updatedAt: new Date().toISOString() },
+              { id: newId, title, updatedAt: new Date().toISOString() },
               ...prev,
             ]);
           }
@@ -136,15 +148,62 @@ export default function App() {
         },
       });
 
-      if (!isNewConversation) moveToTop(activeId);
+      if (!isNewConversation) moveToTop(conversationId);
     } catch (error) {
-      setMessages((prev) => [
-        ...prev,
-        { id: createId(), role: "assistant", content: error.message, isError: true },
-      ]);
+      if (error.name !== "AbortError") {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: createId(),
+            role: "assistant",
+            content: error.message,
+            isError: true,
+            retry: started ? { type: "regenerate" } : retryIfNoTokens,
+          },
+        ]);
+      }
     } finally {
+      abortRef.current = null;
       setIsLoading(false);
     }
+  };
+
+  const handleSend = (text) => {
+    setNotice(null);
+    setMessages((prev) => [...prev, { id: createId(), role: "user", content: text }]);
+
+    return runGeneration({
+      conversationId: activeId,
+      retryIfNoTokens: { type: "resend", text },
+      start: (handlers) =>
+        sendMessage({ conversationId: activeId ?? undefined, message: text, ...handlers }),
+    });
+  };
+
+  const handleRegenerate = () => {
+    if (!activeId) return;
+
+    setNotice(null);
+    setMessages((prev) => trimTrailing(prev, "assistant"));
+
+    return runGeneration({
+      conversationId: activeId,
+      retryIfNoTokens: { type: "regenerate" },
+      start: (handlers) => regenerateReply({ conversationId: activeId, ...handlers }),
+    });
+  };
+
+  const handleRetry = (retry) => {
+    if (retry.type === "resend") {
+      // Nothing was saved on the server, so remove the failed attempt and send again.
+      setMessages((prev) => trimTrailing(prev, "user"));
+      return handleSend(retry.text);
+    }
+    return handleRegenerate();
+  };
+
+  const handleStop = () => {
+    abortRef.current?.abort();
   };
 
   return (
@@ -169,6 +228,9 @@ export default function App() {
         notice={notice}
         onDismissNotice={() => setNotice(null)}
         onSend={handleSend}
+        onStop={handleStop}
+        onRegenerate={handleRegenerate}
+        onRetry={handleRetry}
         onOpenSidebar={() => setIsSidebarOpen(true)}
       />
     </div>

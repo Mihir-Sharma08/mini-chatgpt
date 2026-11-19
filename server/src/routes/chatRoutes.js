@@ -1,9 +1,10 @@
 import { Router } from "express";
-import { validateChatRequest } from "../middleware/validateChat.js";
-import { streamChat } from "../controllers/chatController.js";
+import { validateChatRequest, validateRegenerateRequest } from "../middleware/validateChat.js";
+import { streamChat, regenerateChat } from "../controllers/chatController.js";
 
 const router = Router();
 
 router.post("/stream", validateChatRequest, streamChat);
+router.post("/regenerate", validateRegenerateRequest, regenerateChat);
 
 export default router;

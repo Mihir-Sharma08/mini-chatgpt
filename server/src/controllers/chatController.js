@@ -14,42 +14,34 @@ async function saveAssistantMessage(conversationId, text) {
   }
 }
 
-export async function streamChat(req, res) {
-  const userId = req.user._id;
-  const { message, conversationId } = req.body;
-
-  let clientDisconnected = false;
+/**
+ * Shared streaming logic.
+ *  - modelMessages: the messages to send to the AI
+ *  - persist: async function called ONLY after the AI has produced its first chunk.
+ *             It does the database writes that must happen before streaming
+ *             and returns the conversation document.
+ */
+async function runStream(res, { modelMessages, persist }) {
+  let clientDisconnected = res.destroyed;
   res.on("close", () => {
     clientDisconnected = true;
   });
 
-  // 1. Load context. For an existing chat, verify ownership and fetch recent history.
-  let conversation = null;
-  let history = [];
-
-  if (conversationId) {
-    conversation = await conversationService.getOwnedConversation(userId, conversationId);
-    history = await conversationService.getHistoryForModel(conversation._id);
-  }
-
-  // 2. Ask the AI, and wait for the FIRST chunk before saving anything.
-  const stream = streamChatCompletion([...history, { role: "user", content: message }]);
+  const stream = streamChatCompletion(modelMessages);
   const first = await stream.next();
 
   if (first.done) {
     throw new AppError("The AI returned an empty response. Try rephrasing your message.", 502);
   }
 
-  // 3. The AI works, so now persist: create the chat if needed, then save the user message.
-  if (!conversation) {
-    conversation = await conversationService.createConversation(
-      userId,
-      conversationService.makeTitleFromMessage(message),
-    );
+  // The user pressed Stop before anything arrived: leave no trace in the database.
+  if (clientDisconnected) {
+    await stream.return();
+    return;
   }
-  await conversationService.addMessage(conversation._id, "user", message);
 
-  // 4. Stream the reply to the browser while collecting it.
+  const conversation = await persist();
+
   openSSE(res);
   sendSSE(res, "meta", { conversationId: conversation.id, title: conversation.title });
 
@@ -72,7 +64,6 @@ export async function streamChat(req, res) {
     streamError = error;
   }
 
-  // 5. Save whatever the user actually received, then close the stream.
   const savedMessage = await saveAssistantMessage(conversation._id, fullText);
 
   if (!clientDisconnected) {
@@ -88,4 +79,61 @@ export async function streamChat(req, res) {
   }
 
   res.end();
+}
+
+export async function streamChat(req, res) {
+  const userId = req.user._id;
+  const { message, conversationId } = req.body;
+
+  let existing = null;
+  let history = [];
+
+  if (conversationId) {
+    existing = await conversationService.getOwnedConversation(userId, conversationId);
+    history = await conversationService.getHistoryForModel(existing._id);
+  }
+
+  await runStream(res, {
+    modelMessages: [...history, { role: "user", content: message }],
+    persist: async () => {
+      const conversation =
+        existing ??
+        (await conversationService.createConversation(
+          userId,
+          conversationService.makeTitleFromMessage(message),
+        ));
+      await conversationService.addMessage(conversation._id, "user", message);
+      return conversation;
+    },
+  });
+}
+
+export async function regenerateChat(req, res) {
+  const userId = req.user._id;
+  const conversation = await conversationService.getOwnedConversation(
+    userId,
+    req.body.conversationId,
+  );
+
+  const lastMessage = await conversationService.getLastMessage(conversation._id);
+  if (!lastMessage) {
+    throw new AppError("This conversation has no messages yet.", 400);
+  }
+
+  const history = await conversationService.getHistoryForModel(conversation._id);
+  const modelMessages = lastMessage.role === "assistant" ? history.slice(0, -1) : history;
+
+  if (modelMessages.length === 0 || modelMessages[modelMessages.length - 1].role !== "user") {
+    throw new AppError("There is no user message to answer.", 400);
+  }
+
+  await runStream(res, {
+    modelMessages,
+    persist: async () => {
+      if (lastMessage.role === "assistant") {
+        await conversationService.deleteMessage(lastMessage._id);
+      }
+      return conversation;
+    },
+  });
 }
