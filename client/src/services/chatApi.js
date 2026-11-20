@@ -1,4 +1,9 @@
-import { API_URL, readErrorMessage } from "./api";
+import {
+  API_URL,
+  authHeaders,
+  notifyIfUnauthorized,
+  readErrorMessage,
+} from "./api";
 
 function parseFrame(frame) {
   let event = "message";
@@ -28,7 +33,7 @@ async function streamFrom(path, body, { onMeta, onToken, signal }) {
   try {
     response = await fetch(`${API_URL}${path}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify(body),
       signal,
     });
@@ -37,7 +42,8 @@ async function streamFrom(path, body, { onMeta, onToken, signal }) {
     throw new Error("Cannot reach the server. Is the backend running?");
   }
 
-  if (!response.ok) {
+ if (!response.ok) {
+    notifyIfUnauthorized(response);
     throw new Error(await readErrorMessage(response));
   }
 

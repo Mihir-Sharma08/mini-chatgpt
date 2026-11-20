@@ -1,10 +1,35 @@
 export const API_URL = import.meta.env.VITE_API_URL ?? "";
 
+let authToken = null;
+let unauthorizedHandler = null;
+
+export function setAuthToken(token) {
+  authToken = token;
+}
+
+export function setUnauthorizedHandler(handler) {
+  unauthorizedHandler = handler;
+}
+
+export function authHeaders() {
+  return authToken ? { Authorization: `Bearer ${authToken}` } : {};
+}
+
+// If the server says 401 while we HAVE a token, the session is dead: log out.
+export function notifyIfUnauthorized(response) {
+  if (response.status === 401 && authToken && unauthorizedHandler) {
+    unauthorizedHandler();
+  }
+}
+
 export async function readErrorMessage(response) {
   let message = `Request failed (status ${response.status})`;
   try {
     const body = await response.json();
     if (body.message) message = body.message;
+    if (Array.isArray(body.details) && body.details.length > 0) {
+      message = `${message}: ${body.details.join("; ")}`;
+    }
   } catch {
     // The body wasn't JSON; keep the default message.
   }
@@ -17,13 +42,14 @@ async function request(path, options = {}) {
   try {
     response = await fetch(`${API_URL}${path}`, {
       ...options,
-      headers: { "Content-Type": "application/json", ...options.headers },
+      headers: { "Content-Type": "application/json", ...authHeaders(), ...options.headers },
     });
   } catch {
     throw new Error("Cannot reach the server. Is the backend running?");
   }
 
   if (!response.ok) {
+    notifyIfUnauthorized(response);
     throw new Error(await readErrorMessage(response));
   }
 
@@ -32,6 +58,14 @@ async function request(path, options = {}) {
   const body = await response.json();
   return body.data;
 }
+
+export const registerUser = (details) =>
+  request("/api/auth/register", { method: "POST", body: JSON.stringify(details) });
+
+export const loginUser = (credentials) =>
+  request("/api/auth/login", { method: "POST", body: JSON.stringify(credentials) });
+
+export const fetchMe = () => request("/api/auth/me");
 
 export const fetchConversations = () => request("/api/conversations");
 

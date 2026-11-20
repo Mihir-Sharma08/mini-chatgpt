@@ -1,5 +1,14 @@
 import { useState } from "react";
-import { Plus, MessageSquare, Trash2, X, Bot, Pencil, Check } from "lucide-react";
+import {
+  Plus,
+  MessageSquare,
+  Trash2,
+  X,
+  Bot,
+  Pencil,
+  Check,
+  LogOut,
+} from "lucide-react";
 
 export default function Sidebar({
   conversations,
@@ -12,6 +21,8 @@ export default function Sidebar({
   onRename,
   isOpen,
   onClose,
+  user,
+  onLogout,
 }) {
   const [editingId, setEditingId] = useState(null);
   const [draftTitle, setDraftTitle] = useState("");
@@ -36,7 +47,9 @@ export default function Sidebar({
   };
 
   const confirmDelete = (conversation) => {
-    if (window.confirm(`Delete "${conversation.title}"? This cannot be undone.`)) {
+    if (
+      window.confirm(`Delete "${conversation.title}"? This cannot be undone.`)
+    ) {
       onDelete(conversation.id);
     }
   };
@@ -83,7 +96,9 @@ export default function Sidebar({
 
         <nav className="mt-4 flex-1 overflow-y-auto px-3 pb-4">
           {isListLoading ? (
-            <p className="px-3 text-sm text-zinc-500">Loading conversations...</p>
+            <p className="px-3 text-sm text-zinc-500">
+              Loading conversations...
+            </p>
           ) : conversations.length === 0 ? (
             <p className="px-3 text-sm text-zinc-500">No conversations yet.</p>
           ) : (
@@ -157,6 +172,25 @@ export default function Sidebar({
             </ul>
           )}
         </nav>
+        {user && (
+          <div className="flex items-center gap-3 border-t border-zinc-800 px-4 py-3">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-indigo-600 text-sm font-semibold uppercase">
+              {user.username.charAt(0)}
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-medium">{user.username}</p>
+              <p className="truncate text-xs text-zinc-500">{user.email}</p>
+            </div>
+            <button
+              onClick={onLogout}
+              aria-label="Log out"
+              title="Log out"
+              className="rounded p-1.5 text-zinc-400 hover:bg-zinc-800 hover:text-white"
+            >
+              <LogOut size={16} />
+            </button>
+          </div>
+        )}
       </aside>
     </>
   );
