@@ -1,13 +1,24 @@
 import { rateLimit } from "express-rate-limit";
 import { AppError } from "../utils/AppError.js";
+import { env } from "../config/env.js";
 
-function createLimiter({ windowMs, limit, message, keyGenerator, skipSuccessfulRequests = false }) {
+const shouldSkip = () =>
+  env.nodeEnv !== "production" && process.env.SKIP_RATE_LIMITS === "true";
+
+function createLimiter({
+  windowMs,
+  limit,
+  message,
+  keyGenerator,
+  skipSuccessfulRequests = false,
+}) {
   return rateLimit({
     windowMs,
     limit,
     standardHeaders: "draft-7",
     legacyHeaders: false,
     skipSuccessfulRequests,
+    skip: shouldSkip,
     ...(keyGenerator && { keyGenerator }),
     handler: (req, res, next) => next(new AppError(message, 429)),
   });
@@ -32,7 +43,8 @@ export const loginLimiter = createLimiter({
 export const registerLimiter = createLimiter({
   windowMs: 60 * 60 * 1000,
   limit: 10,
-  message: "Too many accounts created from this network. Please try again later.",
+  message:
+    "Too many accounts created from this network. Please try again later.",
 });
 
 // Protects our AI quota: limits per LOGGED-IN USER, not per IP.
