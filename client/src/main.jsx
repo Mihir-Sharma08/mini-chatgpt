@@ -6,6 +6,10 @@ import App from "./App.jsx";
 import { AuthProvider } from "./context/AuthContext.jsx";
 import ErrorBoundary from "./components/ErrorBoundary.jsx";
 
+import { wakeServer } from "./services/api.js";
+
+wakeServer();
+
 createRoot(document.getElementById("root")).render(
   <StrictMode>
     <ErrorBoundary>

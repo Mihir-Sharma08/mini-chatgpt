@@ -4,6 +4,9 @@
   "description": "Backend for Mini ChatGPT",
   "main": "src/server.js",
   "type": "module",
+   "engines": {
+    "node": ">=20.19"
+  },
   "scripts": {
     "dev": "nodemon src/server.js",
     "start": "node src/server.js",

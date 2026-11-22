@@ -1,5 +1,13 @@
 export const API_URL = import.meta.env.VITE_API_URL ?? "";
 
+export function wakeServer() {
+  if (!API_URL) return;
+
+  fetch(`${API_URL}/api/health`).catch(() => {
+    // Ignore errors: this is only a warm-up ping.
+  });
+}
+
 let authToken = null;
 let unauthorizedHandler = null;
 
